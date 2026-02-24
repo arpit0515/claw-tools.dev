@@ -1,0 +1,57 @@
+[
+  {
+    "id": "gmail",
+    "name": "Gmail Connector",
+    "description": "Read and search Gmail messages. Powers email summaries and morning briefings.",
+    "dir": "tools/gmail",
+    "status": "available",
+    "requires_auth": ["google_oauth2"],
+    "mcp_tools": ["gmail_list", "gmail_search", "gmail_get"],
+    "http_port": 3101,
+    "category": "email"
+  },
+  {
+    "id": "gcal",
+    "name": "Google Calendar",
+    "description": "Fetch today's schedule and upcoming events. Essential for morning briefings.",
+    "dir": "tools/gcal",
+    "status": "available",
+    "requires_auth": ["google_oauth2"],
+    "mcp_tools": ["gcal_today", "gcal_upcoming", "gcal_get"],
+    "http_port": 3102,
+    "category": "calendar"
+  },
+  {
+    "id": "outlook",
+    "name": "Outlook / Exchange",
+    "description": "Microsoft Graph API connector for Outlook mail and Exchange calendar.",
+    "dir": "tools/outlook",
+    "status": "coming-soon",
+    "requires_auth": ["microsoft_oauth2"],
+    "mcp_tools": ["outlook_list", "outlook_calendar"],
+    "http_port": 3103,
+    "category": "email"
+  },
+  {
+    "id": "weather",
+    "name": "Weather",
+    "description": "Current conditions and daily forecasts for morning briefing context.",
+    "dir": "tools/weather",
+    "status": "coming-soon",
+    "requires_auth": [],
+    "mcp_tools": ["weather_now", "weather_forecast"],
+    "http_port": 3104,
+    "category": "utility"
+  },
+  {
+    "id": "deals",
+    "name": "Grocery Deals",
+    "description": "Weekly flyer deals from nearby stores. Let your agent plan smarter shopping.",
+    "dir": "tools/deals",
+    "status": "coming-soon",
+    "requires_auth": [],
+    "mcp_tools": ["deals_search", "deals_nearby"],
+    "http_port": 3105,
+    "category": "utility"
+  }
+]

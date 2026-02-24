@@ -3,7 +3,7 @@
 **MCP tool connectors for AI agents. Clone the repo, pick your tools, run on your own hardware.**
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
-[![Website](https://img.shields.io/badge/website-clawtools.dev-orange)](https://clawtools.dev)
+[![Website](https://img.shields.io/badge/website-clawtools.dev-orange)](https://claw-tools.dev)
 
 ---
 

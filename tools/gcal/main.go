@@ -9,95 +9,58 @@ import (
 	"log"
 	"net/http"
 	"os"
-	"path/filepath"
-	"strings"
 	"time"
 
+	"github.com/arpit0515/claw-tools.dev/shared"
 	"golang.org/x/oauth2"
-	"golang.org/x/oauth2/google"
 	"google.golang.org/api/calendar/v3"
 	"google.golang.org/api/option"
 )
 
-// ── Paths ─────────────────────────────────────────────────────────────────────
+// ── GCal scopes ───────────────────────────────────────────────────────────────
 
-func tokenPath() string {
-	home, _ := os.UserHomeDir()
-	return filepath.Join(home, ".claw", "tokens", "google.json")
+var gcalScopes = []string{
+	calendar.CalendarReadonlyScope,
+	"https://www.googleapis.com/auth/userinfo.email",
 }
 
-func credsPath() string {
-	home, _ := os.UserHomeDir()
-	return filepath.Join(home, ".claw", "config", "google_credentials.json")
-}
+// ── Service factory ───────────────────────────────────────────────────────────
 
-// ── OAuth2 ────────────────────────────────────────────────────────────────────
-
-func oauthConfig() (*oauth2.Config, error) {
-	data, err := os.ReadFile(credsPath())
-	if err != nil {
-		return nil, fmt.Errorf(
-			"credentials not found at %s\n  Download from: https://console.cloud.google.com/ → APIs & Services → Credentials",
-			credsPath(),
-		)
-	}
-	cfg, err := google.ConfigFromJSON(data, calendar.CalendarReadonlyScope)
-	if err != nil {
-		return nil, fmt.Errorf("invalid credentials file: %w", err)
-	}
-	return cfg, nil
-}
-
-func loadToken() (*oauth2.Token, error) {
-	data, err := os.ReadFile(tokenPath())
+func newCalService(ctx context.Context, email string) (*calendar.Service, error) {
+	cfg, err := shared.NewOAuthConfig(gcalScopes...)
 	if err != nil {
 		return nil, err
 	}
-	var tok oauth2.Token
-	return &tok, json.Unmarshal(data, &tok)
-}
-
-func saveToken(tok *oauth2.Token) error {
-	os.MkdirAll(filepath.Dir(tokenPath()), 0700)
-	data, _ := json.MarshalIndent(tok, "", "  ")
-	return os.WriteFile(tokenPath(), data, 0600)
-}
-
-func newCalService(ctx context.Context) (*calendar.Service, error) {
-	cfg, err := oauthConfig()
+	if email == "" {
+		email, err = shared.DefaultAccount()
+		if err != nil {
+			return nil, err
+		}
+	}
+	client, err := shared.GetAuthenticatedClient(cfg, email)
 	if err != nil {
 		return nil, err
 	}
-	tok, err := loadToken()
-	if err != nil {
-		return nil, fmt.Errorf("not authenticated - run: go run . --auth")
-	}
-	client := cfg.Client(ctx, tok)
 	return calendar.NewService(ctx, option.WithHTTPClient(client))
 }
 
+// ── Auth ──────────────────────────────────────────────────────────────────────
+
 func runAuth() error {
-	cfg, err := oauthConfig()
+	cfg, err := shared.NewOAuthConfig(gcalScopes...)
 	if err != nil {
 		return err
 	}
-	url := cfg.AuthCodeURL("state", oauth2.AccessTypeOffline)
-	fmt.Println("\nOpen this URL in your browser:\n\n" + url + "\n")
-	fmt.Print("Paste the authorization code here: ")
-	var code string
-	fmt.Scan(&code)
-	tok, err := cfg.Exchange(context.Background(), strings.TrimSpace(code))
+	result, err := shared.RunAuthFlow(cfg)
 	if err != nil {
-		return fmt.Errorf("token exchange failed: %w", err)
-	}
-	if err := saveToken(tok); err != nil {
 		return err
 	}
-	fmt.Println("\n✓ Authenticated. Token saved to", tokenPath())
+	fmt.Printf("\n✓ Connected: %s\n", result.Email)
+	fmt.Printf("  Token saved to: %s\n\n", shared.TokenPathForAccount(result.Email))
 	return nil
 }
 
-// ── Data ──────────────────────────────────────────────────────────────────────
+// ── Data types ────────────────────────────────────────────────────────────────
 
 type Event struct {
 	ID       string `json:"id"`
@@ -106,9 +69,10 @@ type Event struct {
 	End      string `json:"end"`
 	Location string `json:"location,omitempty"`
 	Link     string `json:"link,omitempty"`
+	Account  string `json:"account,omitempty"`
 }
 
-func toEvent(e *calendar.Event) Event {
+func toEvent(e *calendar.Event, account string) Event {
 	start, end := "", ""
 	if e.Start != nil {
 		start = e.Start.DateTime
@@ -129,11 +93,14 @@ func toEvent(e *calendar.Event) Event {
 		End:      end,
 		Location: e.Location,
 		Link:     e.HtmlLink,
+		Account:  account,
 	}
 }
 
-func fetchToday(ctx context.Context) ([]Event, error) {
-	svc, err := newCalService(ctx)
+// ── Data fetchers ─────────────────────────────────────────────────────────────
+
+func fetchToday(ctx context.Context, email string) ([]Event, error) {
+	svc, err := newCalService(ctx, email)
 	if err != nil {
 		return nil, err
 	}
@@ -152,13 +119,13 @@ func fetchToday(ctx context.Context) ([]Event, error) {
 	}
 	events := make([]Event, 0, len(resp.Items))
 	for _, e := range resp.Items {
-		events = append(events, toEvent(e))
+		events = append(events, toEvent(e, email))
 	}
 	return events, nil
 }
 
-func fetchUpcoming(ctx context.Context, days int) ([]Event, error) {
-	svc, err := newCalService(ctx)
+func fetchUpcoming(ctx context.Context, email string, days int) ([]Event, error) {
+	svc, err := newCalService(ctx, email)
 	if err != nil {
 		return nil, err
 	}
@@ -177,13 +144,13 @@ func fetchUpcoming(ctx context.Context, days int) ([]Event, error) {
 	}
 	events := make([]Event, 0, len(resp.Items))
 	for _, e := range resp.Items {
-		events = append(events, toEvent(e))
+		events = append(events, toEvent(e, email))
 	}
 	return events, nil
 }
 
-func fetchEvent(ctx context.Context, id string) (*Event, error) {
-	svc, err := newCalService(ctx)
+func fetchEvent(ctx context.Context, email, id string) (*Event, error) {
+	svc, err := newCalService(ctx, email)
 	if err != nil {
 		return nil, err
 	}
@@ -191,8 +158,50 @@ func fetchEvent(ctx context.Context, id string) (*Event, error) {
 	if err != nil {
 		return nil, err
 	}
-	ev := toEvent(e)
+	ev := toEvent(e, email)
 	return &ev, nil
+}
+
+// fetchTodayAllAccounts fetches today's events across all connected accounts
+func fetchTodayAllAccounts(ctx context.Context) ([]Event, error) {
+	accounts, err := shared.ListAccounts()
+	if err != nil {
+		return nil, err
+	}
+	if len(accounts) == 0 {
+		return nil, fmt.Errorf("no accounts connected — run: go run . --auth")
+	}
+	all := []Event{}
+	for _, acc := range accounts {
+		events, err := fetchToday(ctx, acc.Email)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "warning: skipping %s: %v\n", acc.Email, err)
+			continue
+		}
+		all = append(all, events...)
+	}
+	return all, nil
+}
+
+// fetchUpcomingAllAccounts fetches upcoming events across all connected accounts
+func fetchUpcomingAllAccounts(ctx context.Context, days int) ([]Event, error) {
+	accounts, err := shared.ListAccounts()
+	if err != nil {
+		return nil, err
+	}
+	if len(accounts) == 0 {
+		return nil, fmt.Errorf("no accounts connected — run: go run . --auth")
+	}
+	all := []Event{}
+	for _, acc := range accounts {
+		events, err := fetchUpcoming(ctx, acc.Email, days)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "warning: skipping %s: %v\n", acc.Email, err)
+			continue
+		}
+		all = append(all, events...)
+	}
+	return all, nil
 }
 
 // ── MCP ───────────────────────────────────────────────────────────────────────
@@ -221,7 +230,7 @@ func writeResp(v mcpResp) {
 	fmt.Println(string(data))
 }
 
-func okResp(id interface{}, result interface{}) mcpResp {
+func okResp(id, result interface{}) mcpResp {
 	return mcpResp{JSONRPC: "2.0", ID: id, Result: result}
 }
 
@@ -233,26 +242,43 @@ var toolDefs = map[string]interface{}{
 	"tools": []map[string]interface{}{
 		{
 			"name":        "gcal_today",
-			"description": "Get all events on today's Google Calendar",
-			"inputSchema": map[string]interface{}{"type": "object", "properties": map[string]interface{}{}},
-		},
-		{
-			"name":        "gcal_upcoming",
-			"description": "Get upcoming Google Calendar events",
+			"description": "Get all events on today's Google Calendar across one or all connected accounts.",
 			"inputSchema": map[string]interface{}{
 				"type": "object",
 				"properties": map[string]interface{}{
-					"days": map[string]interface{}{"type": "integer", "description": "Number of days ahead to look (default 7)"},
+					"account": map[string]interface{}{"type": "string", "description": "Email address of account to use. Omit for all accounts."},
+				},
+			},
+		},
+		{
+			"name":        "gcal_upcoming",
+			"description": "Get upcoming Google Calendar events across one or all connected accounts.",
+			"inputSchema": map[string]interface{}{
+				"type": "object",
+				"properties": map[string]interface{}{
+					"days":    map[string]interface{}{"type": "integer", "description": "Number of days ahead to look (default 7)"},
+					"account": map[string]interface{}{"type": "string", "description": "Email address of account to use. Omit for all accounts."},
 				},
 			},
 		},
 		{
 			"name":        "gcal_get",
-			"description": "Get a Google Calendar event by ID",
+			"description": "Get a Google Calendar event by ID.",
+			"inputSchema": map[string]interface{}{
+				"type": "object",
+				"properties": map[string]interface{}{
+					"id":      map[string]interface{}{"type": "string", "description": "Calendar event ID"},
+					"account": map[string]interface{}{"type": "string", "description": "Email address of account the event belongs to"},
+				},
+				"required": []string{"id"},
+			},
+		},
+		{
+			"name":        "gcal_accounts",
+			"description": "List all connected Google Calendar accounts.",
 			"inputSchema": map[string]interface{}{
 				"type":       "object",
-				"properties": map[string]interface{}{"id": map[string]interface{}{"type": "string"}},
-				"required":   []string{"id"},
+				"properties": map[string]interface{}{},
 			},
 		},
 	},
@@ -274,7 +300,7 @@ func runMCP() {
 			writeResp(okResp(req.ID, map[string]interface{}{
 				"protocolVersion": "2024-11-05",
 				"capabilities":    map[string]interface{}{"tools": map[string]interface{}{}},
-				"serverInfo":      map[string]interface{}{"name": "claw-gcal", "version": "0.1.0"},
+				"serverInfo":      map[string]interface{}{"name": "claw-gcal", "version": "1.0.0"},
 			}))
 
 		case "tools/list":
@@ -285,11 +311,22 @@ func runMCP() {
 				Name      string                 `json:"name"`
 				Arguments map[string]interface{} `json:"arguments"`
 			}
-			json.Unmarshal(req.Params, &p)
+			if err := json.Unmarshal(req.Params, &p); err != nil {
+				writeResp(errResp(req.ID, "invalid params"))
+				continue
+			}
+
+			account, _ := p.Arguments["account"].(string)
 
 			switch p.Name {
 			case "gcal_today":
-				events, err := fetchToday(ctx)
+				var events []Event
+				var err error
+				if account != "" {
+					events, err = fetchToday(ctx, account)
+				} else {
+					events, err = fetchTodayAllAccounts(ctx)
+				}
 				if err != nil {
 					writeResp(errResp(req.ID, err.Error()))
 					continue
@@ -304,7 +341,13 @@ func runMCP() {
 				if n, ok := p.Arguments["days"].(float64); ok {
 					days = int(n)
 				}
-				events, err := fetchUpcoming(ctx, days)
+				var events []Event
+				var err error
+				if account != "" {
+					events, err = fetchUpcoming(ctx, account, days)
+				} else {
+					events, err = fetchUpcomingAllAccounts(ctx, days)
+				}
 				if err != nil {
 					writeResp(errResp(req.ID, err.Error()))
 					continue
@@ -316,12 +359,27 @@ func runMCP() {
 
 			case "gcal_get":
 				id, _ := p.Arguments["id"].(string)
-				event, err := fetchEvent(ctx, id)
+				if id == "" {
+					writeResp(errResp(req.ID, "id required"))
+					continue
+				}
+				event, err := fetchEvent(ctx, account, id)
 				if err != nil {
 					writeResp(errResp(req.ID, err.Error()))
 					continue
 				}
 				data, _ := json.MarshalIndent(event, "", "  ")
+				writeResp(okResp(req.ID, map[string]interface{}{
+					"content": []map[string]interface{}{{"type": "text", "text": string(data)}},
+				}))
+
+			case "gcal_accounts":
+				accounts, err := shared.ListAccounts()
+				if err != nil {
+					writeResp(errResp(req.ID, err.Error()))
+					continue
+				}
+				data, _ := json.MarshalIndent(accounts, "", "  ")
 				writeResp(okResp(req.ID, map[string]interface{}{
 					"content": []map[string]interface{}{{"type": "text", "text": string(data)}},
 				}))
@@ -352,33 +410,62 @@ func runHTTP(port int) {
 	http.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
 		jsonOK(w, map[string]string{"status": "ok", "tool": "claw-gcal"})
 	})
+
+	// GET /gcal/accounts
+	http.HandleFunc("/gcal/accounts", func(w http.ResponseWriter, r *http.Request) {
+		accounts, err := shared.ListAccounts()
+		if err != nil {
+			jsonErr(w, 500, err.Error())
+			return
+		}
+		jsonOK(w, accounts)
+	})
+
+	// GET /gcal/today?account=x@gmail.com
 	http.HandleFunc("/gcal/today", func(w http.ResponseWriter, r *http.Request) {
-		events, err := fetchToday(ctx)
+		account := r.URL.Query().Get("account")
+		var events []Event
+		var err error
+		if account != "" {
+			events, err = fetchToday(ctx, account)
+		} else {
+			events, err = fetchTodayAllAccounts(ctx)
+		}
 		if err != nil {
 			jsonErr(w, 500, err.Error())
 			return
 		}
 		jsonOK(w, events)
 	})
+
+	// GET /gcal/upcoming?days=7&account=x@gmail.com
 	http.HandleFunc("/gcal/upcoming", func(w http.ResponseWriter, r *http.Request) {
 		days := 7
-		if d := r.URL.Query().Get("days"); d != "" {
-			fmt.Sscanf(d, "%d", &days)
+		fmt.Sscanf(r.URL.Query().Get("days"), "%d", &days)
+		account := r.URL.Query().Get("account")
+		var events []Event
+		var err error
+		if account != "" {
+			events, err = fetchUpcoming(ctx, account, days)
+		} else {
+			events, err = fetchUpcomingAllAccounts(ctx, days)
 		}
-		events, err := fetchUpcoming(ctx, days)
 		if err != nil {
 			jsonErr(w, 500, err.Error())
 			return
 		}
 		jsonOK(w, events)
 	})
+
+	// GET /gcal/get?id=...&account=x@gmail.com
 	http.HandleFunc("/gcal/get", func(w http.ResponseWriter, r *http.Request) {
 		id := r.URL.Query().Get("id")
 		if id == "" {
 			jsonErr(w, 400, "id required")
 			return
 		}
-		event, err := fetchEvent(ctx, id)
+		account := r.URL.Query().Get("account")
+		event, err := fetchEvent(ctx, account, id)
 		if err != nil {
 			jsonErr(w, 500, err.Error())
 			return
@@ -394,26 +481,73 @@ func runHTTP(port int) {
 // ── Main ──────────────────────────────────────────────────────────────────────
 
 func main() {
-	mode := flag.String("mode", "", "mcp | http")
-	port := flag.Int("port", 3102, "HTTP port")
-	doAuth := flag.Bool("auth", false, "Run OAuth2 setup")
+	mode    := flag.String("mode", "", "mcp | http")
+	port    := flag.Int("port", 3102, "HTTP port")
+	doAuth  := flag.Bool("auth", false, "Add a Google account via OAuth")
+	listAcc := flag.Bool("accounts", false, "List connected accounts")
+	revoke  := flag.String("revoke", "", "Revoke and remove an account (email address)")
 	flag.Parse()
 
-	if *doAuth {
+	switch {
+	case *doAuth:
 		if err := runAuth(); err != nil {
 			fmt.Fprintln(os.Stderr, "error:", err)
 			os.Exit(1)
 		}
-		return
-	}
 
-	switch *mode {
-	case "mcp":
+	case *listAcc:
+		accounts, err := shared.ListAccounts()
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "error:", err)
+			os.Exit(1)
+		}
+		if len(accounts) == 0 {
+			fmt.Println("No accounts connected. Run: go run . --auth")
+			return
+		}
+		fmt.Printf("Connected accounts (%d):\n", len(accounts))
+		for _, a := range accounts {
+			fmt.Printf("  • %s  (added %s)\n", a.Email, a.AddedAt.Format("2006-01-02"))
+		}
+
+	case *revoke != "":
+		if err := revokeAccount(*revoke); err != nil {
+			fmt.Fprintln(os.Stderr, "error:", err)
+			os.Exit(1)
+		}
+		fmt.Printf("✓ Account %s revoked and removed\n", *revoke)
+
+	case *mode == "mcp":
 		runMCP()
-	case "http":
+
+	case *mode == "http":
 		runHTTP(*port)
+
 	default:
-		fmt.Fprintln(os.Stderr, "Usage: go run . --mode mcp|http [--port 3102] [--auth]")
+		fmt.Fprintln(os.Stderr, `Usage:
+  go run . --auth                      Add a Google account
+  go run . --accounts                  List connected accounts
+  go run . --revoke user@gmail.com     Remove an account
+  go run . --mode mcp                  Start MCP server (stdio)
+  go run . --mode http [--port 3102]   Start HTTP server`)
 		os.Exit(1)
 	}
+}
+
+// revokeAccount calls Google's revoke endpoint and deletes the local token
+func revokeAccount(email string) error {
+	tok, err := shared.LoadToken(email)
+	if err != nil {
+		return err
+	}
+	token := tok.AccessToken
+	if tok.RefreshToken != "" {
+		token = tok.RefreshToken
+	}
+	resp, err := (&oauth2.Config{}).Client(context.Background(), tok).
+		Get("https://oauth2.googleapis.com/revoke?token=" + token)
+	if err == nil {
+		resp.Body.Close()
+	}
+	return shared.DeleteToken(email)
 }

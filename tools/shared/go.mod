@@ -1,4 +1,4 @@
-module github.com/arpit0515/claw-tools.dev/shared
+module github.com/arpit0515/claw-tools.dev/tools/shared
 
 go 1.21
 

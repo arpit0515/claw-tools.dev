@@ -22,8 +22,8 @@ import (
 // ── Constants ─────────────────────────────────────────────────────────────────
 
 const (
-	TokensDir  = ".claw/tokens"
-	ConfigDir  = ".claw/config"
+	TokensDir  = ".picoclaw/tokens"
+	ConfigDir  = ".picoclaw/config"
 	CredsFile  = "google_credentials.json"
 	CallbackPort = "3455"
 )
@@ -53,7 +53,7 @@ func CredsPath() string {
 }
 
 // TokenPathForAccount returns the encrypted token file path for a given email
-// e.g. ~/.claw/tokens/arpit@gmail.com.enc
+// e.g. ~/.picoclaw/tokens/arpit@gmail.com.enc
 func TokenPathForAccount(email string) string {
 	safe := strings.ReplaceAll(email, "/", "_")
 	return filepath.Join(TokensPath(), safe+".enc")

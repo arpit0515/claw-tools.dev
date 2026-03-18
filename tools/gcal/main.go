@@ -63,13 +63,16 @@ func runAuth() error {
 // ── Data types ────────────────────────────────────────────────────────────────
 
 type Event struct {
-	ID       string `json:"id"`
-	Summary  string `json:"summary"`
-	Start    string `json:"start"`
-	End      string `json:"end"`
-	Location string `json:"location,omitempty"`
-	Link     string `json:"link,omitempty"`
-	Account  string `json:"account,omitempty"`
+    ID          string   `json:"id"`
+    Summary     string   `json:"summary"`
+    Start       string   `json:"start"`
+    End         string   `json:"end"`
+    Location    string   `json:"location,omitempty"`
+    Link        string   `json:"link,omitempty"`
+    MeetLink    string   `json:"meet_link,omitempty"`
+    Description string   `json:"description,omitempty"`
+    Attendees   []string `json:"attendees,omitempty"`
+    Account     string   `json:"account,omitempty"`
 }
 
 func toEvent(e *calendar.Event, account string) Event {
@@ -86,15 +89,33 @@ func toEvent(e *calendar.Event, account string) Event {
 			end = e.End.Date
 		}
 	}
-	return Event{
-		ID:       e.Id,
-		Summary:  e.Summary,
-		Start:    start,
-		End:      end,
-		Location: e.Location,
-		Link:     e.HtmlLink,
-		Account:  account,
-	}
+	ev := Event{
+        ID:          e.Id,
+        Summary:     e.Summary,
+        Start:       start,
+        End:         end,
+        Location:    e.Location,
+        Link:        e.HtmlLink,
+        Description: e.Description,
+        Account:     account,
+    }
+
+    // Google Meet link
+    if e.ConferenceData != nil {
+        for _, ep := range e.ConferenceData.EntryPoints {
+            if ep.EntryPointType == "video" {
+                ev.MeetLink = ep.Uri
+                break
+            }
+        }
+    }
+
+    // Attendees
+    for _, a := range e.Attendees {
+        ev.Attendees = append(ev.Attendees, a.Email)
+    }
+
+    return ev
 }
 
 // ── Data fetchers ─────────────────────────────────────────────────────────────

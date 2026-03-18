@@ -166,8 +166,8 @@ Both tools share the same token at `~/.claw/tokens/google.json`. You only need t
 
 ## Related
 
-- [PicoClaw](https://github.com/arpit0515/picoclaw) - lightweight personal AI agent  
-- [clawtools.dev](https://clawtools.dev) - project website
+- [Setup Wizard](https://github.com/arpit0515/claw-setup-wizard) - lightweight personal AI agent  
+- [clawtools.dev](https://claw-tools.dev) - project website
 
 ---
 

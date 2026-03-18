@@ -12,7 +12,7 @@
 ClawTools is a collection of MCP (Model Context Protocol) tool connectors that let any AI agent - PicoClaw, Cursor, Claude Code, Windsurf, or your own - connect to real services like Gmail, Google Calendar, and Outlook.
 
 - **No hosted infrastructure.** Runs entirely on your machine or Pi.
-- **Your tokens stay yours.** OAuth tokens saved in `~/.claw/tokens/` - never sent anywhere.
+- **Your tokens stay yours.** OAuth tokens saved in `~/.picoclaw/tokens/` - never sent anywhere.
 - **Any agent.** MCP stdio for editors. HTTP REST for custom agents.
 - **Open source.** MIT licensed. Add a tool via PR.
 
@@ -131,13 +131,13 @@ cd tools/gmail && go run . --auth
 cd tools/gcal && go run . --auth
 ```
 
-Both tools share the same token at `~/.claw/tokens/google.json`. You only need to auth once per Google account.
+Both tools share the same token at `~/.picoclaw/tokens/google.json`. You only need to auth once per Google account.
 
 **Setup steps:**
 1. Create a project at [console.cloud.google.com](https://console.cloud.google.com/)
 2. Enable Gmail API and/or Google Calendar API
 3. Create OAuth 2.0 credentials (Desktop app)
-4. Download `credentials.json` → save as `~/.claw/config/google_credentials.json`
+4. Download `credentials.json` → save as `~/.picoclaw/config/google_credentials.json`
 5. Run `go run . --auth`
 
 ---

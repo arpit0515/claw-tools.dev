@@ -11,7 +11,7 @@ import (
 	"os"
 	"time"
 
-	"github.com/arpit0515/claw-tools.dev/shared"
+	"github.com/arpit0515/claw-tools.dev/tools/shared"
 	"golang.org/x/oauth2"
 	"google.golang.org/api/calendar/v3"
 	"google.golang.org/api/option"

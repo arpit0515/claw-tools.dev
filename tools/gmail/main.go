@@ -10,7 +10,7 @@ import (
 	"net/http"
 	"os"
 
-	"github.com/arpit0515/claw-tools.dev/shared"
+	"github.com/arpit0515/claw-tools.dev/tools/shared"
 	"golang.org/x/oauth2"
 	"google.golang.org/api/gmail/v1"
 	"google.golang.org/api/option"

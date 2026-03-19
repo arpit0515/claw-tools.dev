@@ -2,21 +2,44 @@
 
 Read and search Gmail messages for your AI agent. Powers email summaries, morning briefings, and inbox triage.
 
-## Service
+## Install
 
-- **URL**: http://localhost:3101
-- **Health**: GET http://localhost:3101/health
-- **Start**: `cd ~/claw-tools.dev/tools/gmail && go run . --mode http --port 3101`
-- **Mode**: HTTP REST
+- **Runtime**: Go 1.21+
+- **Build**: `go build -o gmail-mcp .`
+- **Binary**: `gmail-mcp`
+- **Verify**: `./gmail-mcp --version`
+
+## MCP
+
+- **Mode**: stdio
+- **Command**: `./gmail-mcp`
+- **Args**: `--mode mcp`
+
+## Agent Config
+```json
+{
+  "tools": {
+    "mcp": {
+      "servers": {
+        "claw-gmail": {
+          "command": "~/.picoclaw/tools/gmail/gmail-mcp",
+          "args": ["--mode", "mcp"],
+          "cwd": "~/.picoclaw/tools/gmail"
+        }
+      }
+    }
+  }
+}
+```
 
 ## Available Tools
 
-| Tool | Method | Endpoint | Description |
-|---|---|---|---|
-| gmail_list | GET | /gmail/list | List recent messages. Params: `account`, `q`, `max` |
-| gmail_search | GET | /gmail/search | Search by query. Params: `q` (required), `account`, `max` |
-| gmail_get | GET | /gmail/get | Get message by ID. Params: `id` (required), `account` |
-| gmail_accounts | GET | /gmail/accounts | List all connected accounts |
+| Tool | Description | Parameters |
+|---|---|---|
+| gmail_list | List recent messages | `account`, `q`, `max` |
+| gmail_search | Search by query | `q` (required), `account`, `max` |
+| gmail_get | Get message by ID | `id` (required), `account` |
+| gmail_accounts | List all connected accounts | — |
 
 ## Auth
 
@@ -25,26 +48,9 @@ Read and search Gmail messages for your AI agent. Powers email summaries, mornin
 - **Tokens**: `~/.picoclaw/tokens/<email>.enc` (AES-256 encrypted)
 - **Multi-account**: Yes — omit `account` param to query all accounts
 
-## Agent Config
-
-When this tool is connected, add to `~/.picoclaw/config.json`:
-
-```json
-{
-  "tools": {
-    "gmail": {
-      "url": "http://localhost:3101",
-      "autostart": true,
-      "health": "http://localhost:3101/health"
-    }
-  }
-}
+## Example Agent Queries
 ```
-
-## Example Queries
-
-```
-GET /gmail/list?max=10
-GET /gmail/search?q=from:boss@company.com+is:unread
-GET /gmail/list?account=work@company.com&q=is:unread
+"Show me my last 5 emails"
+"Any unread emails from my boss?"
+"Search for emails about the project proposal"
 ```

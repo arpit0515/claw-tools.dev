@@ -2,21 +2,44 @@
 
 Read Google Calendar events for your AI agent. Powers daily schedule briefings, meeting prep, and time-aware planning.
 
-## Service
+## Install
 
-- **URL**: http://localhost:3102
-- **Health**: GET http://localhost:3102/health
-- **Start**: `cd ~/claw-tools.dev/tools/gcal && go run . --mode http --port 3102`
-- **Mode**: HTTP REST
+- **Runtime**: Go 1.21+
+- **Build**: `go build -o gcal-mcp .`
+- **Binary**: `gcal-mcp`
+- **Verify**: `./gcal-mcp --version`
+
+## MCP
+
+- **Mode**: stdio
+- **Command**: `./gcal-mcp`
+- **Args**: `--mode mcp`
+
+## Agent Config
+```json
+{
+  "tools": {
+    "mcp": {
+      "servers": {
+        "claw-gcal": {
+          "command": "~/.picoclaw/tools/gcal/gcal-mcp",
+          "args": ["--mode", "mcp"],
+          "cwd": "~/.picoclaw/tools/gcal"
+        }
+      }
+    }
+  }
+}
+```
 
 ## Available Tools
 
-| Tool | Method | Endpoint | Description |
-|---|---|---|---|
-| gcal_today | GET | /gcal/today | Today's events. Params: `account` |
-| gcal_upcoming | GET | /gcal/upcoming | Upcoming events. Params: `days` (default 7), `account` |
-| gcal_get | GET | /gcal/get | Get event by ID. Params: `id` (required), `account` |
-| gcal_accounts | GET | /gcal/accounts | List all connected accounts |
+| Tool | Description | Parameters |
+|---|---|---|
+| gcal_today | Today's events | `account` |
+| gcal_upcoming | Upcoming events | `days` (default 7), `account` |
+| gcal_get | Get event by ID | `id` (required), `account` |
+| gcal_accounts | List all connected accounts | — |
 
 ## Auth
 
@@ -25,26 +48,9 @@ Read Google Calendar events for your AI agent. Powers daily schedule briefings, 
 - **Tokens**: `~/.picoclaw/tokens/<email>.enc` (AES-256 encrypted)
 - **Multi-account**: Yes — omit `account` param to query all accounts
 
-## Agent Config
-
-When this tool is connected, add to `~/.picoclaw/config.json`:
-
-```json
-{
-  "tools": {
-    "gcal": {
-      "url": "http://localhost:3102",
-      "autostart": true,
-      "health": "http://localhost:3102/health"
-    }
-  }
-}
+## Example Agent Queries
 ```
-
-## Example Queries
-
-```
-GET /gcal/today
-GET /gcal/upcoming?days=3
-GET /gcal/today?account=work@company.com
+"What's on my calendar today?"
+"Any meetings in the next 3 days?"
+"What time is my next event?"
 ```

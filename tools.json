@@ -4,10 +4,13 @@
     "name": "Gmail Connector",
     "description": "Read and search Gmail messages. Powers email summaries and morning briefings.",
     "dir": "tools/gmail",
+    "skill_md": "tools/gmail/SKILL.md",
     "status": "available",
     "requires_auth": ["google_oauth2"],
-    "mcp_tools": ["gmail_list", "gmail_search", "gmail_get"],
+    "mcp_tools": ["gmail_list", "gmail_search", "gmail_get", "gmail_accounts"],
     "http_port": 3101,
+    "service_start": "go run . --mode http --port 3101",
+    "health_url": "http://localhost:3101/health",
     "category": "email"
   },
   {
@@ -15,10 +18,13 @@
     "name": "Google Calendar",
     "description": "Fetch today's schedule and upcoming events. Essential for morning briefings.",
     "dir": "tools/gcal",
+    "skill_md": "tools/gcal/SKILL.md",
     "status": "available",
     "requires_auth": ["google_oauth2"],
-    "mcp_tools": ["gcal_today", "gcal_upcoming", "gcal_get"],
+    "mcp_tools": ["gcal_today", "gcal_upcoming", "gcal_get", "gcal_accounts"],
     "http_port": 3102,
+    "service_start": "go run . --mode http --port 3102",
+    "health_url": "http://localhost:3102/health",
     "category": "calendar"
   },
   {
@@ -26,10 +32,13 @@
     "name": "Outlook / Exchange",
     "description": "Microsoft Graph API connector for Outlook mail and Exchange calendar.",
     "dir": "tools/outlook",
+    "skill_md": "tools/outlook/SKILL.md",
     "status": "coming-soon",
     "requires_auth": ["microsoft_oauth2"],
     "mcp_tools": ["outlook_list", "outlook_calendar"],
     "http_port": 3103,
+    "service_start": "go run . --mode http --port 3103",
+    "health_url": "http://localhost:3103/health",
     "category": "email"
   },
   {
@@ -37,10 +46,13 @@
     "name": "Weather",
     "description": "Current conditions and daily forecasts for morning briefing context.",
     "dir": "tools/weather",
+    "skill_md": "tools/weather/SKILL.md",
     "status": "coming-soon",
     "requires_auth": [],
     "mcp_tools": ["weather_now", "weather_forecast"],
     "http_port": 3104,
+    "service_start": "go run . --mode http --port 3104",
+    "health_url": "http://localhost:3104/health",
     "category": "utility"
   },
   {
@@ -48,10 +60,13 @@
     "name": "Grocery Deals",
     "description": "Weekly flyer deals from nearby stores. Let your agent plan smarter shopping.",
     "dir": "tools/deals",
+    "skill_md": "tools/deals/SKILL.md",
     "status": "coming-soon",
     "requires_auth": [],
     "mcp_tools": ["deals_search", "deals_nearby"],
     "http_port": 3105,
+    "service_start": "go run . --mode http --port 3105",
+    "health_url": "http://localhost:3105/health",
     "category": "utility"
   }
 ]

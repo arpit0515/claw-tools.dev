@@ -30,7 +30,6 @@ func newGmailService(ctx context.Context, email string) (*gmail.Service, error) 
 	if err != nil {
 		return nil, err
 	}
-	// If no account specified, use the first connected one
 	if email == "" {
 		email, err = shared.DefaultAccount()
 		if err != nil {
@@ -133,7 +132,6 @@ func fetchMessage(ctx context.Context, email, id string) (*Message, error) {
 	return msg, nil
 }
 
-// fetchAllAccounts fetches messages across all connected accounts and merges results
 func fetchAllAccounts(ctx context.Context, maxResults int64, query string) ([]Message, error) {
 	accounts, err := shared.ListAccounts()
 	if err != nil {
@@ -146,7 +144,6 @@ func fetchAllAccounts(ctx context.Context, maxResults int64, query string) ([]Me
 	for _, acc := range accounts {
 		msgs, err := fetchMessages(ctx, acc.Email, maxResults, query)
 		if err != nil {
-			// Log and continue — don't fail all accounts if one is broken
 			fmt.Fprintf(os.Stderr, "warning: skipping %s: %v\n", acc.Email, err)
 			continue
 		}
@@ -155,7 +152,7 @@ func fetchAllAccounts(ctx context.Context, maxResults int64, query string) ([]Me
 	return all, nil
 }
 
-// ── MCP ───────────────────────────────────────────────────────────────────────
+// ── MCP types ─────────────────────────────────────────────────────────────────
 
 type mcpReq struct {
 	JSONRPC string          `json:"jsonrpc"`
@@ -176,7 +173,7 @@ type mcpError struct {
 	Message string `json:"message"`
 }
 
-func writeResp(v mcpResp) {
+func writeMCPResp(v mcpResp) {
 	data, _ := json.Marshal(v)
 	fmt.Println(string(data))
 }
@@ -188,6 +185,8 @@ func okResp(id, result interface{}) mcpResp {
 func errResp(id interface{}, msg string) mcpResp {
 	return mcpResp{JSONRPC: "2.0", ID: id, Error: &mcpError{Code: -32000, Message: msg}}
 }
+
+// ── Tool definitions ──────────────────────────────────────────────────────────
 
 var toolDefs = map[string]interface{}{
 	"tools": []map[string]interface{}{
@@ -239,6 +238,79 @@ var toolDefs = map[string]interface{}{
 	},
 }
 
+// ── Shared tool executor ──────────────────────────────────────────────────────
+// Used by both runMCP() (stdio) and the /mcp HTTP handler.
+// Returns the mcpResp to send back — caller decides how to write it.
+
+func executeTool(ctx context.Context, req mcpReq) mcpResp {
+	var p struct {
+		Name      string                 `json:"name"`
+		Arguments map[string]interface{} `json:"arguments"`
+	}
+	if err := json.Unmarshal(req.Params, &p); err != nil {
+		return errResp(req.ID, "invalid params")
+	}
+
+	account, _ := p.Arguments["account"].(string)
+
+	switch p.Name {
+	case "gmail_list", "gmail_search":
+		var max int64 = 10
+		if p.Name == "gmail_search" {
+			max = 20
+		}
+		if n, ok := p.Arguments["max_results"].(float64); ok {
+			max = int64(n)
+		}
+		query, _ := p.Arguments["query"].(string)
+
+		var msgs []Message
+		var err error
+		if account != "" {
+			msgs, err = fetchMessages(ctx, account, max, query)
+		} else {
+			msgs, err = fetchAllAccounts(ctx, max, query)
+		}
+		if err != nil {
+			return errResp(req.ID, err.Error())
+		}
+		data, _ := json.MarshalIndent(msgs, "", "  ")
+		return okResp(req.ID, map[string]interface{}{
+			"content": []map[string]interface{}{{"type": "text", "text": string(data)}},
+		})
+
+	case "gmail_get":
+		id, _ := p.Arguments["id"].(string)
+		if id == "" {
+			return errResp(req.ID, "id required")
+		}
+		msg, err := fetchMessage(ctx, account, id)
+		if err != nil {
+			return errResp(req.ID, err.Error())
+		}
+		data, _ := json.MarshalIndent(msg, "", "  ")
+		return okResp(req.ID, map[string]interface{}{
+			"content": []map[string]interface{}{{"type": "text", "text": string(data)}},
+		})
+
+	case "gmail_accounts":
+		accounts, err := shared.ListAccounts()
+		if err != nil {
+			return errResp(req.ID, err.Error())
+		}
+		data, _ := json.MarshalIndent(accounts, "", "  ")
+		return okResp(req.ID, map[string]interface{}{
+			"content": []map[string]interface{}{{"type": "text", "text": string(data)}},
+		})
+
+	default:
+		return errResp(req.ID, "unknown tool: "+p.Name)
+	}
+}
+
+// ── MCP stdio mode ────────────────────────────────────────────────────────────
+// Unchanged — still works for direct testing or Claude Desktop use
+
 func runMCP() {
 	ctx := context.Background()
 	scanner := bufio.NewScanner(os.Stdin)
@@ -252,89 +324,25 @@ func runMCP() {
 
 		switch req.Method {
 		case "initialize":
-			writeResp(okResp(req.ID, map[string]interface{}{
+			writeMCPResp(okResp(req.ID, map[string]interface{}{
 				"protocolVersion": "2024-11-05",
 				"capabilities":    map[string]interface{}{"tools": map[string]interface{}{}},
 				"serverInfo":      map[string]interface{}{"name": "claw-gmail", "version": "1.0.0"},
 			}))
 
+		case "notifications/initialized":
+			// notification — no response needed
+
 		case "tools/list":
-			writeResp(okResp(req.ID, toolDefs))
+			writeMCPResp(okResp(req.ID, toolDefs))
 
 		case "tools/call":
-			var p struct {
-				Name      string                 `json:"name"`
-				Arguments map[string]interface{} `json:"arguments"`
-			}
-			if err := json.Unmarshal(req.Params, &p); err != nil {
-				writeResp(errResp(req.ID, "invalid params"))
-				continue
-			}
-
-			account, _ := p.Arguments["account"].(string)
-
-			switch p.Name {
-			case "gmail_list", "gmail_search":
-				var max int64 = 10
-				if p.Name == "gmail_search" {
-					max = 20
-				}
-				if n, ok := p.Arguments["max_results"].(float64); ok {
-					max = int64(n)
-				}
-				query, _ := p.Arguments["query"].(string)
-
-				var msgs []Message
-				var err error
-				if account != "" {
-					msgs, err = fetchMessages(ctx, account, max, query)
-				} else {
-					msgs, err = fetchAllAccounts(ctx, max, query)
-				}
-				if err != nil {
-					writeResp(errResp(req.ID, err.Error()))
-					continue
-				}
-				data, _ := json.MarshalIndent(msgs, "", "  ")
-				writeResp(okResp(req.ID, map[string]interface{}{
-					"content": []map[string]interface{}{{"type": "text", "text": string(data)}},
-				}))
-
-			case "gmail_get":
-				id, _ := p.Arguments["id"].(string)
-				if id == "" {
-					writeResp(errResp(req.ID, "id required"))
-					continue
-				}
-				msg, err := fetchMessage(ctx, account, id)
-				if err != nil {
-					writeResp(errResp(req.ID, err.Error()))
-					continue
-				}
-				data, _ := json.MarshalIndent(msg, "", "  ")
-				writeResp(okResp(req.ID, map[string]interface{}{
-					"content": []map[string]interface{}{{"type": "text", "text": string(data)}},
-				}))
-
-			case "gmail_accounts":
-				accounts, err := shared.ListAccounts()
-				if err != nil {
-					writeResp(errResp(req.ID, err.Error()))
-					continue
-				}
-				data, _ := json.MarshalIndent(accounts, "", "  ")
-				writeResp(okResp(req.ID, map[string]interface{}{
-					"content": []map[string]interface{}{{"type": "text", "text": string(data)}},
-				}))
-
-			default:
-				writeResp(errResp(req.ID, "unknown tool: "+p.Name))
-			}
+			writeMCPResp(executeTool(ctx, req))
 		}
 	}
 }
 
-// ── HTTP ──────────────────────────────────────────────────────────────────────
+// ── HTTP mode ─────────────────────────────────────────────────────────────────
 
 func jsonOK(w http.ResponseWriter, v interface{}) {
 	w.Header().Set("Content-Type", "application/json")
@@ -354,7 +362,52 @@ func runHTTP(port int) {
 		jsonOK(w, map[string]string{"status": "ok", "tool": "claw-gmail"})
 	})
 
-	// GET /gmail/accounts
+	// ── /mcp — MCP JSON-RPC over HTTP ────────────────────────────────────────
+	// This is what PicoClaw calls when config.json has:
+	//   "claw-gmail": { "url": "http://localhost:3101/mcp" }
+	//
+	// Handles the full MCP handshake + tool calls.
+	// Uses the same executeTool() as runMCP() — no duplicated logic.
+	http.HandleFunc("/mcp", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.Error(w, "POST only", http.StatusMethodNotAllowed)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+
+		var req mcpReq
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			json.NewEncoder(w).Encode(errResp(nil, "parse error"))
+			return
+		}
+
+		switch req.Method {
+
+		case "initialize":
+			json.NewEncoder(w).Encode(okResp(req.ID, map[string]interface{}{
+				"protocolVersion": "2024-11-05",
+				"capabilities":    map[string]interface{}{"tools": map[string]interface{}{}},
+				"serverInfo":      map[string]interface{}{"name": "claw-gmail", "version": "1.0.0"},
+			}))
+
+		case "notifications/initialized":
+			// Notification — no response body needed, but must not error
+			w.WriteHeader(http.StatusOK)
+			w.Write([]byte("{}"))
+
+		case "tools/list":
+			json.NewEncoder(w).Encode(okResp(req.ID, toolDefs))
+
+		case "tools/call":
+			json.NewEncoder(w).Encode(executeTool(ctx, req))
+
+		default:
+			json.NewEncoder(w).Encode(errResp(req.ID, "unknown method: "+req.Method))
+		}
+	})
+
+	// ── REST endpoints (unchanged) ────────────────────────────────────────────
+
 	http.HandleFunc("/gmail/accounts", func(w http.ResponseWriter, r *http.Request) {
 		accounts, err := shared.ListAccounts()
 		if err != nil {
@@ -364,7 +417,6 @@ func runHTTP(port int) {
 		jsonOK(w, accounts)
 	})
 
-	// GET /gmail/list?account=x@gmail.com&q=...&max=10
 	http.HandleFunc("/gmail/list", func(w http.ResponseWriter, r *http.Request) {
 		account := r.URL.Query().Get("account")
 		query := r.URL.Query().Get("q")
@@ -385,7 +437,6 @@ func runHTTP(port int) {
 		jsonOK(w, msgs)
 	})
 
-	// GET /gmail/search?q=...&account=x@gmail.com&max=20
 	http.HandleFunc("/gmail/search", func(w http.ResponseWriter, r *http.Request) {
 		q := r.URL.Query().Get("q")
 		if q == "" {
@@ -410,7 +461,6 @@ func runHTTP(port int) {
 		jsonOK(w, msgs)
 	})
 
-	// GET /gmail/get?id=...&account=x@gmail.com
 	http.HandleFunc("/gmail/get", func(w http.ResponseWriter, r *http.Request) {
 		id := r.URL.Query().Get("id")
 		if id == "" {
@@ -427,7 +477,7 @@ func runHTTP(port int) {
 	})
 
 	addr := fmt.Sprintf(":%d", port)
-	log.Printf("claw-gmail listening on %s (HTTP mode)", addr)
+	log.Printf("claw-gmail listening on %s (HTTP mode) — MCP at POST /mcp", addr)
 	log.Fatal(http.ListenAndServe(addr, nil))
 }
 
@@ -487,13 +537,11 @@ func main() {
 	}
 }
 
-// revokeAccount calls Google's revoke endpoint and deletes the local token
 func revokeAccount(email string) error {
 	tok, err := shared.LoadToken(email)
 	if err != nil {
 		return err
 	}
-	// Best-effort revoke on Google's side
 	token := tok.AccessToken
 	if tok.RefreshToken != "" {
 		token = tok.RefreshToken

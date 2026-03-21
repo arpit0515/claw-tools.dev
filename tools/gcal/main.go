@@ -63,16 +63,16 @@ func runAuth() error {
 // ── Data types ────────────────────────────────────────────────────────────────
 
 type Event struct {
-    ID          string   `json:"id"`
-    Summary     string   `json:"summary"`
-    Start       string   `json:"start"`
-    End         string   `json:"end"`
-    Location    string   `json:"location,omitempty"`
-    Link        string   `json:"link,omitempty"`
-    MeetLink    string   `json:"meet_link,omitempty"`
-    Description string   `json:"description,omitempty"`
-    Attendees   []string `json:"attendees,omitempty"`
-    Account     string   `json:"account,omitempty"`
+	ID          string   `json:"id"`
+	Summary     string   `json:"summary"`
+	Start       string   `json:"start"`
+	End         string   `json:"end"`
+	Location    string   `json:"location,omitempty"`
+	Link        string   `json:"link,omitempty"`
+	MeetLink    string   `json:"meet_link,omitempty"`
+	Description string   `json:"description,omitempty"`
+	Attendees   []string `json:"attendees,omitempty"`
+	Account     string   `json:"account,omitempty"`
 }
 
 func toEvent(e *calendar.Event, account string) Event {
@@ -90,32 +90,27 @@ func toEvent(e *calendar.Event, account string) Event {
 		}
 	}
 	ev := Event{
-        ID:          e.Id,
-        Summary:     e.Summary,
-        Start:       start,
-        End:         end,
-        Location:    e.Location,
-        Link:        e.HtmlLink,
-        Description: e.Description,
-        Account:     account,
-    }
-
-    // Google Meet link
-    if e.ConferenceData != nil {
-        for _, ep := range e.ConferenceData.EntryPoints {
-            if ep.EntryPointType == "video" {
-                ev.MeetLink = ep.Uri
-                break
-            }
-        }
-    }
-
-    // Attendees
-    for _, a := range e.Attendees {
-        ev.Attendees = append(ev.Attendees, a.Email)
-    }
-
-    return ev
+		ID:          e.Id,
+		Summary:     e.Summary,
+		Start:       start,
+		End:         end,
+		Location:    e.Location,
+		Link:        e.HtmlLink,
+		Description: e.Description,
+		Account:     account,
+	}
+	if e.ConferenceData != nil {
+		for _, ep := range e.ConferenceData.EntryPoints {
+			if ep.EntryPointType == "video" {
+				ev.MeetLink = ep.Uri
+				break
+			}
+		}
+	}
+	for _, a := range e.Attendees {
+		ev.Attendees = append(ev.Attendees, a.Email)
+	}
+	return ev
 }
 
 // ── Data fetchers ─────────────────────────────────────────────────────────────
@@ -183,7 +178,6 @@ func fetchEvent(ctx context.Context, email, id string) (*Event, error) {
 	return &ev, nil
 }
 
-// fetchTodayAllAccounts fetches today's events across all connected accounts
 func fetchTodayAllAccounts(ctx context.Context) ([]Event, error) {
 	accounts, err := shared.ListAccounts()
 	if err != nil {
@@ -204,7 +198,6 @@ func fetchTodayAllAccounts(ctx context.Context) ([]Event, error) {
 	return all, nil
 }
 
-// fetchUpcomingAllAccounts fetches upcoming events across all connected accounts
 func fetchUpcomingAllAccounts(ctx context.Context, days int) ([]Event, error) {
 	accounts, err := shared.ListAccounts()
 	if err != nil {
@@ -225,7 +218,7 @@ func fetchUpcomingAllAccounts(ctx context.Context, days int) ([]Event, error) {
 	return all, nil
 }
 
-// ── MCP ───────────────────────────────────────────────────────────────────────
+// ── MCP types ─────────────────────────────────────────────────────────────────
 
 type mcpReq struct {
 	JSONRPC string          `json:"jsonrpc"`
@@ -246,7 +239,7 @@ type mcpError struct {
 	Message string `json:"message"`
 }
 
-func writeResp(v mcpResp) {
+func writeMCPResp(v mcpResp) {
 	data, _ := json.Marshal(v)
 	fmt.Println(string(data))
 }
@@ -258,6 +251,8 @@ func okResp(id, result interface{}) mcpResp {
 func errResp(id interface{}, msg string) mcpResp {
 	return mcpResp{JSONRPC: "2.0", ID: id, Error: &mcpError{Code: -32000, Message: msg}}
 }
+
+// ── Tool definitions ──────────────────────────────────────────────────────────
 
 var toolDefs = map[string]interface{}{
 	"tools": []map[string]interface{}{
@@ -305,6 +300,90 @@ var toolDefs = map[string]interface{}{
 	},
 }
 
+// ── Shared tool executor ──────────────────────────────────────────────────────
+// Used by both runMCP() (stdio) and the /mcp HTTP handler.
+// Returns the mcpResp to send back — caller decides how to write it.
+
+func executeTool(ctx context.Context, req mcpReq) mcpResp {
+	var p struct {
+		Name      string                 `json:"name"`
+		Arguments map[string]interface{} `json:"arguments"`
+	}
+	if err := json.Unmarshal(req.Params, &p); err != nil {
+		return errResp(req.ID, "invalid params")
+	}
+
+	account, _ := p.Arguments["account"].(string)
+
+	switch p.Name {
+	case "gcal_today":
+		var events []Event
+		var err error
+		if account != "" {
+			events, err = fetchToday(ctx, account)
+		} else {
+			events, err = fetchTodayAllAccounts(ctx)
+		}
+		if err != nil {
+			return errResp(req.ID, err.Error())
+		}
+		data, _ := json.MarshalIndent(events, "", "  ")
+		return okResp(req.ID, map[string]interface{}{
+			"content": []map[string]interface{}{{"type": "text", "text": string(data)}},
+		})
+
+	case "gcal_upcoming":
+		days := 7
+		if n, ok := p.Arguments["days"].(float64); ok {
+			days = int(n)
+		}
+		var events []Event
+		var err error
+		if account != "" {
+			events, err = fetchUpcoming(ctx, account, days)
+		} else {
+			events, err = fetchUpcomingAllAccounts(ctx, days)
+		}
+		if err != nil {
+			return errResp(req.ID, err.Error())
+		}
+		data, _ := json.MarshalIndent(events, "", "  ")
+		return okResp(req.ID, map[string]interface{}{
+			"content": []map[string]interface{}{{"type": "text", "text": string(data)}},
+		})
+
+	case "gcal_get":
+		id, _ := p.Arguments["id"].(string)
+		if id == "" {
+			return errResp(req.ID, "id required")
+		}
+		event, err := fetchEvent(ctx, account, id)
+		if err != nil {
+			return errResp(req.ID, err.Error())
+		}
+		data, _ := json.MarshalIndent(event, "", "  ")
+		return okResp(req.ID, map[string]interface{}{
+			"content": []map[string]interface{}{{"type": "text", "text": string(data)}},
+		})
+
+	case "gcal_accounts":
+		accounts, err := shared.ListAccounts()
+		if err != nil {
+			return errResp(req.ID, err.Error())
+		}
+		data, _ := json.MarshalIndent(accounts, "", "  ")
+		return okResp(req.ID, map[string]interface{}{
+			"content": []map[string]interface{}{{"type": "text", "text": string(data)}},
+		})
+
+	default:
+		return errResp(req.ID, "unknown tool: "+p.Name)
+	}
+}
+
+// ── MCP stdio mode ────────────────────────────────────────────────────────────
+// Unchanged — still works for direct testing or Claude Desktop use
+
 func runMCP() {
 	ctx := context.Background()
 	scanner := bufio.NewScanner(os.Stdin)
@@ -318,101 +397,25 @@ func runMCP() {
 
 		switch req.Method {
 		case "initialize":
-			writeResp(okResp(req.ID, map[string]interface{}{
+			writeMCPResp(okResp(req.ID, map[string]interface{}{
 				"protocolVersion": "2024-11-05",
 				"capabilities":    map[string]interface{}{"tools": map[string]interface{}{}},
 				"serverInfo":      map[string]interface{}{"name": "claw-gcal", "version": "1.0.0"},
 			}))
 
+		case "notifications/initialized":
+			// notification — no response needed
+
 		case "tools/list":
-			writeResp(okResp(req.ID, toolDefs))
+			writeMCPResp(okResp(req.ID, toolDefs))
 
 		case "tools/call":
-			var p struct {
-				Name      string                 `json:"name"`
-				Arguments map[string]interface{} `json:"arguments"`
-			}
-			if err := json.Unmarshal(req.Params, &p); err != nil {
-				writeResp(errResp(req.ID, "invalid params"))
-				continue
-			}
-
-			account, _ := p.Arguments["account"].(string)
-
-			switch p.Name {
-			case "gcal_today":
-				var events []Event
-				var err error
-				if account != "" {
-					events, err = fetchToday(ctx, account)
-				} else {
-					events, err = fetchTodayAllAccounts(ctx)
-				}
-				if err != nil {
-					writeResp(errResp(req.ID, err.Error()))
-					continue
-				}
-				data, _ := json.MarshalIndent(events, "", "  ")
-				writeResp(okResp(req.ID, map[string]interface{}{
-					"content": []map[string]interface{}{{"type": "text", "text": string(data)}},
-				}))
-
-			case "gcal_upcoming":
-				days := 7
-				if n, ok := p.Arguments["days"].(float64); ok {
-					days = int(n)
-				}
-				var events []Event
-				var err error
-				if account != "" {
-					events, err = fetchUpcoming(ctx, account, days)
-				} else {
-					events, err = fetchUpcomingAllAccounts(ctx, days)
-				}
-				if err != nil {
-					writeResp(errResp(req.ID, err.Error()))
-					continue
-				}
-				data, _ := json.MarshalIndent(events, "", "  ")
-				writeResp(okResp(req.ID, map[string]interface{}{
-					"content": []map[string]interface{}{{"type": "text", "text": string(data)}},
-				}))
-
-			case "gcal_get":
-				id, _ := p.Arguments["id"].(string)
-				if id == "" {
-					writeResp(errResp(req.ID, "id required"))
-					continue
-				}
-				event, err := fetchEvent(ctx, account, id)
-				if err != nil {
-					writeResp(errResp(req.ID, err.Error()))
-					continue
-				}
-				data, _ := json.MarshalIndent(event, "", "  ")
-				writeResp(okResp(req.ID, map[string]interface{}{
-					"content": []map[string]interface{}{{"type": "text", "text": string(data)}},
-				}))
-
-			case "gcal_accounts":
-				accounts, err := shared.ListAccounts()
-				if err != nil {
-					writeResp(errResp(req.ID, err.Error()))
-					continue
-				}
-				data, _ := json.MarshalIndent(accounts, "", "  ")
-				writeResp(okResp(req.ID, map[string]interface{}{
-					"content": []map[string]interface{}{{"type": "text", "text": string(data)}},
-				}))
-
-			default:
-				writeResp(errResp(req.ID, "unknown tool: "+p.Name))
-			}
+			writeMCPResp(executeTool(ctx, req))
 		}
 	}
 }
 
-// ── HTTP ──────────────────────────────────────────────────────────────────────
+// ── HTTP mode ─────────────────────────────────────────────────────────────────
 
 func jsonOK(w http.ResponseWriter, v interface{}) {
 	w.Header().Set("Content-Type", "application/json")
@@ -432,7 +435,52 @@ func runHTTP(port int) {
 		jsonOK(w, map[string]string{"status": "ok", "tool": "claw-gcal"})
 	})
 
-	// GET /gcal/accounts
+	// ── /mcp — MCP JSON-RPC over HTTP ────────────────────────────────────────
+	// This is what PicoClaw calls when config.json has:
+	//   "claw-gcal": { "url": "http://localhost:3102/mcp" }
+	//
+	// Handles the full MCP handshake + tool calls.
+	// Uses the same executeTool() as runMCP() — no duplicated logic.
+	http.HandleFunc("/mcp", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.Error(w, "POST only", http.StatusMethodNotAllowed)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+
+		var req mcpReq
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			json.NewEncoder(w).Encode(errResp(nil, "parse error"))
+			return
+		}
+
+		switch req.Method {
+
+		case "initialize":
+			json.NewEncoder(w).Encode(okResp(req.ID, map[string]interface{}{
+				"protocolVersion": "2024-11-05",
+				"capabilities":    map[string]interface{}{"tools": map[string]interface{}{}},
+				"serverInfo":      map[string]interface{}{"name": "claw-gcal", "version": "1.0.0"},
+			}))
+
+		case "notifications/initialized":
+			// Notification — no response body needed, but must not error
+			w.WriteHeader(http.StatusOK)
+			w.Write([]byte("{}"))
+
+		case "tools/list":
+			json.NewEncoder(w).Encode(okResp(req.ID, toolDefs))
+
+		case "tools/call":
+			json.NewEncoder(w).Encode(executeTool(ctx, req))
+
+		default:
+			json.NewEncoder(w).Encode(errResp(req.ID, "unknown method: "+req.Method))
+		}
+	})
+
+	// ── REST endpoints (unchanged) ────────────────────────────────────────────
+
 	http.HandleFunc("/gcal/accounts", func(w http.ResponseWriter, r *http.Request) {
 		accounts, err := shared.ListAccounts()
 		if err != nil {
@@ -442,7 +490,6 @@ func runHTTP(port int) {
 		jsonOK(w, accounts)
 	})
 
-	// GET /gcal/today?account=x@gmail.com
 	http.HandleFunc("/gcal/today", func(w http.ResponseWriter, r *http.Request) {
 		account := r.URL.Query().Get("account")
 		var events []Event
@@ -459,7 +506,6 @@ func runHTTP(port int) {
 		jsonOK(w, events)
 	})
 
-	// GET /gcal/upcoming?days=7&account=x@gmail.com
 	http.HandleFunc("/gcal/upcoming", func(w http.ResponseWriter, r *http.Request) {
 		days := 7
 		fmt.Sscanf(r.URL.Query().Get("days"), "%d", &days)
@@ -478,7 +524,6 @@ func runHTTP(port int) {
 		jsonOK(w, events)
 	})
 
-	// GET /gcal/get?id=...&account=x@gmail.com
 	http.HandleFunc("/gcal/get", func(w http.ResponseWriter, r *http.Request) {
 		id := r.URL.Query().Get("id")
 		if id == "" {
@@ -495,7 +540,7 @@ func runHTTP(port int) {
 	})
 
 	addr := fmt.Sprintf(":%d", port)
-	log.Printf("claw-gcal listening on %s (HTTP mode)", addr)
+	log.Printf("claw-gcal listening on %s (HTTP mode) — MCP at POST /mcp", addr)
 	log.Fatal(http.ListenAndServe(addr, nil))
 }
 
@@ -555,7 +600,6 @@ func main() {
 	}
 }
 
-// revokeAccount calls Google's revoke endpoint and deletes the local token
 func revokeAccount(email string) error {
 	tok, err := shared.LoadToken(email)
 	if err != nil {

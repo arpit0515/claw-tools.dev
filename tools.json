@@ -47,7 +47,7 @@
     "description": "Current conditions and daily forecasts for morning briefing context.",
     "dir": "tools/weather",
     "skill_md": "tools/weather/SKILL.md",
-    "status": "coming-soon",
+    "status": "available",
     "requires_auth": [],
     "mcp_tools": ["weather_now", "weather_forecast"],
     "http_port": 3104,
